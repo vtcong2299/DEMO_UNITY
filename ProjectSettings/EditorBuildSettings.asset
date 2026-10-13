@@ -1,0 +1,32 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1045 &1
+EditorBuildSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Scenes:
+  - enabled: 1
+    path: Assets/_Talk/Scenes/01_FakeNull.unity
+    guid: 77a4154cbc67541429dcbf6af0a2884d
+  - enabled: 1
+    path: Assets/_Talk/Scenes/02_NativeCost.unity
+    guid: 8b81c4a757efe944aa3f431d99679801
+  - enabled: 1
+    path: Assets/_Talk/Scenes/03_PlayerLoop.unity
+    guid: 2f8a09357b5bcc74c83c4c5a16493354
+  - enabled: 1
+    path: Assets/_Talk/Scenes/04_Lifetime.unity
+    guid: b0c071d3750326b49b7a00e1d3edadff
+  - enabled: 1
+    path: Assets/_Talk/Scenes/05_Serialization.unity
+    guid: 820a1ca38e10c6540861bd502bd07113
+  - enabled: 1
+    path: Assets/_Talk/Scenes/06_GarbageCollector.unity
+    guid: 2861b205966cfd74c9c7069b73b117cb
+  - enabled: 1
+    path: Assets/_Talk/Scenes/07_Rendering.unity
+    guid: 9991e7c9c5ab299429a9b5a7b678307e
+  - enabled: 1
+    path: Assets/_Talk/Scenes/08_EnterPlayMode.unity
+    guid: b78be693faf598e4abed361e3bb6abec
+  m_configObjects: {}

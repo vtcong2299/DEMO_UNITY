@@ -285,7 +285,7 @@ D.build = (() => {
   return svg(W, H, b);
 })();
 
-const out = path.join(__dirname, 'img');
+const out = path.join(__dirname, '..', 'img');
 fs.mkdirSync(out, { recursive: true });
 for (const [name, s] of Object.entries(D)) {
   fs.writeFileSync(path.join(out, name + '.svg'), s);

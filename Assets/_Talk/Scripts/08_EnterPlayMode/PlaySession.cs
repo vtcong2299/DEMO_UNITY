@@ -20,7 +20,7 @@ public static class PlaySession
             }
             catch (Exception e)
             {
-                DemoGui.Log($"Handler từ lần Play trước bị lỗi: {e.GetType().Name}", DemoGui.Red);
+                DemoGui.Result("Handler từ lần Play trước", e.GetType().Name, DemoGui.Verdict.Bad, "Trỏ tới object của lần Play cũ, đã bị Destroy.");
             }
         }
     }

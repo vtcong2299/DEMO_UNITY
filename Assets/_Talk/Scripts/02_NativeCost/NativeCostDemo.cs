@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using Unity.Profiling;
 using UnityEngine;
+using V = DemoGui.Verdict;
 
 public class NativeCostDemo : MonoBehaviour
 {
@@ -14,7 +15,6 @@ public class NativeCostDemo : MonoBehaviour
     [SerializeField] int findIterations = 1000;
     [SerializeField] int updateObjectCount = 10000;
 
-    readonly List<string> _results = new();
     readonly List<GameObject> _clutter = new();
     readonly List<GameObject> _updaters = new();
     readonly List<ManagedTicker> _tickers = new();
@@ -24,7 +24,6 @@ public class NativeCostDemo : MonoBehaviour
     UpdateMode _mode;
     Rigidbody _cachedBody;
     GameObject _cachedTarget;
-    string _stringSink;
     bool _boolSink;
     bool _busy;
     float _smoothedFrameMs;
@@ -57,19 +56,32 @@ public class NativeCostDemo : MonoBehaviour
 
     #region Benchmarks
 
-    IEnumerator Run(string title, int count, Action<int> body)
+    struct Measure
     {
-        _busy = true;
+        public double Ms;
+        public long Kb;
+    }
+
+    IEnumerator Run(int count, Action<int> body, Action<Measure> done)
+    {
         yield return null;
         var watch = Stopwatch.StartNew();
         body(count);
         watch.Stop();
         yield return null;
-        long kb = _gcRecorder.LastValue / 1024;
-        string line = $"{title}: <b>{watch.Elapsed.TotalMilliseconds:F2} ms</b>, GC cả frame ≈ <b>{kb} KB</b>";
-        _results.Add(line);
-        if (_results.Count > 8) _results.RemoveAt(0);
-        DemoGui.Log($"{title} ({count:N0} lần): {watch.Elapsed.TotalMilliseconds:F2} ms, GC ≈ {kb} KB");
+        done(new Measure { Ms = watch.Elapsed.TotalMilliseconds, Kb = _gcRecorder.LastValue / 1024 });
+    }
+
+    IEnumerator Compare(string slow, Action<int> slowBody, string fast, Action<int> fastBody, int count, string note)
+    {
+        _busy = true;
+        Measure a = default, b = default;
+        yield return Run(count, slowBody, m => a = m);
+        yield return Run(count, fastBody, m => b = m);
+        double ratio = b.Ms > 0.0001 ? a.Ms / b.Ms : 0;
+        DemoGui.Result(slow, $"{a.Ms:F2} ms · {a.Kb} KB", V.Bad);
+        DemoGui.Result(fast, $"{b.Ms:F2} ms · {b.Kb} KB", V.Good, $"Chậm hơn ≈ {ratio:F1} lần. {note}");
+        DemoGui.Log($"{slow} vs {fast} ({count:N0} lần): {a.Ms:F2} ms / {b.Ms:F2} ms");
         _busy = false;
     }
 
@@ -114,9 +126,9 @@ public class NativeCostDemo : MonoBehaviour
         for (int i = 0; i < n; i++) _cachedTarget = GameObject.Find("Target");
     }
 
-    void FindByType(int n)
+    void CachedTarget(int n)
     {
-        for (int i = 0; i < n; i++) _cachedBody = FindAnyObjectByType<Rigidbody>();
+        for (int i = 0; i < n; i++) _boolSink = _cachedTarget != null;
     }
 
     void AddClutter(int count)
@@ -124,14 +136,14 @@ public class NativeCostDemo : MonoBehaviour
         var root = new GameObject($"Clutter x{count}").transform;
         _clutter.Add(root.gameObject);
         for (int i = 0; i < count; i++) new GameObject($"Clutter {i}").transform.SetParent(root, false);
-        DemoGui.Log($"Đã thêm {count} object rỗng vào scene. Chạy lại test Find để so sánh.", DemoGui.Yellow);
+        DemoGui.Log($"Đã thêm {count:N0} object rỗng. Scene giờ có {_clutter.Count * count:N0} object thêm.", DemoGui.Yellow);
     }
 
     void ClearClutter()
     {
         foreach (var go in _clutter) Destroy(go);
         _clutter.Clear();
-        DemoGui.Log("Đã xoá object rác");
+        DemoGui.Log("Đã xoá object thêm");
     }
 
     #endregion
@@ -155,7 +167,6 @@ public class NativeCostDemo : MonoBehaviour
             if (mode == UpdateMode.EmptyUpdate) go.AddComponent<EmptyUpdateBehaviour>();
             else _tickers.Add(go.AddComponent<ManagedTicker>());
         }
-        DemoGui.Log($"Chế độ: {mode} với {updateObjectCount:N0} object", DemoGui.Yellow);
     }
 
     double AverageMainThreadMs()
@@ -173,42 +184,38 @@ public class NativeCostDemo : MonoBehaviour
 
     void OnGUI()
     {
-        DemoGui.Begin("02 · Mỗi lần gọi API = một lần qua ranh giới C# ⇄ C++", "Đo thời gian và rác bộ nhớ của những dòng code quen thuộc.");
-
+        DemoGui.Begin("02 · Gọi API Unity tốn bao nhiêu?", "Mỗi lần gọi là một lần đi qua ranh giới C# ⇄ C++. Đo bằng số thì chênh bao nhiêu?");
         GUI.enabled = !_busy;
-        DemoGui.Section($"A. So sánh từng cặp ({iterations:N0} lần)");
-        if (DemoGui.Button("GetComponent mỗi lần  vs  lưu sẵn"))
-            StartCoroutine(RunPair("GetComponent mỗi lần", GetComponentEveryTime, "Field đã lưu", CachedComponent, iterations));
-        if (DemoGui.Button("transform.position đọc 3 lần  vs  đọc 1 lần"))
-            StartCoroutine(RunPair("Đọc position 3 lần", PositionReadThreeTimes, "Đọc 1 lần vào biến", PositionReadOnce, iterations));
-        if (DemoGui.Button("tag == \"Player\"  vs  CompareTag"))
-            StartCoroutine(RunPair("tag ==", TagEquals, "CompareTag", TagCompare, iterations));
+        DemoGui.Section($"A. So sánh từng cặp ({iterations:N0} lần mỗi cách)");
+        if (DemoGui.Step(1, "GetComponent mỗi lần  vs  lưu sẵn vào field", "Lưu sẵn nhanh hơn nhiều lần, cả hai đều không tạo rác."))
+            StartCoroutine(Compare("GetComponent<Rigidbody>() mỗi lần", GetComponentEveryTime, "Field _rb đã lưu", CachedComponent, iterations, "Lấy 1 lần trong Awake."));
+        if (DemoGui.Step(2, "Đọc position 3 lần  vs  đọc 1 lần vào biến", "Đọc 1 lần nhanh hơn rõ rệt."))
+            StartCoroutine(Compare("position đọc 3 lần + ghi 1", PositionReadThreeTimes, "Đọc 1 lần vào biến + ghi 1", PositionReadOnce, iterations, "Mỗi lần đọc property là một lần gọi xuống engine."));
+        if (DemoGui.Step(3, "tag == \"Player\"  vs  CompareTag(\"Player\")", "Thời gian gần nhau, nhưng tag == tạo vài MB rác, CompareTag 0 KB."))
+            StartCoroutine(Compare("gameObject.tag == \"Player\"", TagEquals, "CompareTag(\"Player\")", TagCompare, iterations, "Đọc .tag tạo string mới mỗi lần."));
 
-        DemoGui.Section($"B. Họ hàm Find ({findIterations:N0} lần)");
-        if (DemoGui.Button("GameObject.Find  vs  FindAnyObjectByType"))
-            StartCoroutine(RunPair("GameObject.Find(\"Target\")", FindByName, "FindAnyObjectByType<Rigidbody>", FindByType, findIterations));
+        DemoGui.Section($"B. GameObject.Find ({findIterations:N0} lần)");
+        if (DemoGui.Step(4, "GameObject.Find  vs  reference đã lưu", "Find chậm hơn rất nhiều. Thêm 5.000 object rồi đo lại: Find chậm thêm."))
+            StartCoroutine(Compare("GameObject.Find(\"Target\")", FindByName, "Reference đã lưu", CachedTarget, findIterations, "Find duyệt toàn bộ scene mỗi lần gọi."));
         GUILayout.BeginHorizontal();
         if (DemoGui.Button("+5.000 object vào scene")) AddClutter(5000);
         if (DemoGui.Button("Xoá object thêm")) ClearClutter();
         GUILayout.EndHorizontal();
         GUI.enabled = true;
 
-        DemoGui.Section("Kết quả gần nhất");
-        foreach (string line in _results) DemoGui.Label(line);
-
-        DemoGui.Section($"C. Update rỗng ({updateObjectCount:N0} object)");
-        int selected = DemoGui.Choice((int)_mode, new[] { "Không có Update", "Update rỗng", "1 Manager gọi Tick()" });
+        DemoGui.Section($"C. Hàm Update rỗng ({updateObjectCount:N0} object)");
+        DemoGui.Hint("5 · Chọn lần lượt 3 chế độ, nhìn Frame time ở bảng Kết quả. Kỳ vọng: Update rỗng tốn nhất, Manager rẻ hơn.");
+        int selected = DemoGui.Choice((int)_mode, new[] { "Không có Update", "Update rỗng", "1 Manager gọi Tick()" }, 3);
         if (selected != (int)_mode) SetMode((UpdateMode)selected);
-        DemoGui.Value("Frame time (trung bình)", $"{_smoothedFrameMs:F2} ms", DemoGui.Yellow);
-        DemoGui.Value("Main Thread (Profiler, 15 frame)", $"{AverageMainThreadMs():F2} ms", DemoGui.Yellow);
-        DemoGui.Label("<color=#9AA4B1>Mở Profiler → CPU → tìm BehaviourUpdate để thấy rõ hơn.</color>");
-        DemoGui.End();
-    }
 
-    IEnumerator RunPair(string titleA, Action<int> a, string titleB, Action<int> b, int count)
-    {
-        yield return Run(titleA, count, a);
-        yield return Run(titleB, count, b);
+        DemoGui.Takeaway("Lưu kết quả <b>GetComponent</b>/<b>Find</b> 1 lần. Đọc property vào biến cục bộ. So tag bằng <b>CompareTag</b>. Xoá Update rỗng.");
+
+        string[] modeNames = { "Không có Update", "Update rỗng", "Manager" };
+        DemoGui.Live("Chế độ C đang chạy", modeNames[(int)_mode], V.Info);
+        DemoGui.Live("Frame time (trung bình)", $"{_smoothedFrameMs:F2} ms", _mode == UpdateMode.EmptyUpdate ? V.Bad : V.Info);
+        DemoGui.Live("Main Thread (Profiler)", $"{AverageMainThreadMs():F2} ms", V.Info, "Số đo trong Editor: chỉ nhìn tỉ lệ, không nhìn số tuyệt đối.");
+        DemoGui.End();
+        if (mover != null) DemoGui.WorldLabel(mover.position + Vector3.up * 0.8f, "Mover (bị đọc position)");
     }
 
     #endregion

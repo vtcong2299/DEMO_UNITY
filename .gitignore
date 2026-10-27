@@ -107,3 +107,7 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+
+# Matrix MCP: per-machine files (the port derives from the project path)
+/.mcp.json
+/.codex/config.toml

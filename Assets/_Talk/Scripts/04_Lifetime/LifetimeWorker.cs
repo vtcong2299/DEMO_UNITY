@@ -31,11 +31,22 @@ public class LifetimeWorker : MonoBehaviour
         }
     }
 
+    public int OwnedTicks { get; private set; }
+
     public IEnumerator ExternalLoop()
     {
         while (true)
         {
             ExternalTicks++;
+            yield return HalfSecond;
+        }
+    }
+
+    public IEnumerator OwnedLoop()
+    {
+        while (true)
+        {
+            OwnedTicks++;
             yield return HalfSecond;
         }
     }

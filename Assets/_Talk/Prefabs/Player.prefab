@@ -127,6 +127,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 205e931fbb90ce6479dc7297acad0efc, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PlayerStats
-  speed: 5
+  speed: 7.5
   weapon: {fileID: 4822814913354246462, guid: 720973891348e114d844774517ab7f6e, type: 3}
   hiddenButSaved: 42

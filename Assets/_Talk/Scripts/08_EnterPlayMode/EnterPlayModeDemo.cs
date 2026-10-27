@@ -1,4 +1,5 @@
 using UnityEngine;
+using V = DemoGui.Verdict;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -15,44 +16,42 @@ public class EnterPlayModeDemo : MonoBehaviour
 
     void OnGUI()
     {
-        DemoGui.Begin("08 · Enter Play Mode Options", "Tắt Domain Reload: vào Play nhanh hơn, nhưng biến static không tự reset.");
+        DemoGui.Begin("08 · Vào Play nhanh hơn, nhưng static không tự reset", "Tắt Domain Reload thì được gì, mất gì?");
 
+        DemoGui.Section("Các bước");
+        DemoGui.Hint("1 · Domain Reload đang bật: Stop rồi Play 2 lần. Kỳ vọng: mọi bộ đếm đều là 1. Ghi lại thời gian vào Play.");
 #if UNITY_EDITOR
-        DemoGui.Section("A. Cấu hình hiện tại");
         bool reloadDisabled = EditorSettings.enterPlayModeOptionsEnabled &&
                               (EditorSettings.enterPlayModeOptions & EnterPlayModeOptions.DisableDomainReload) != 0;
-        DemoGui.Value("Domain Reload", reloadDisabled ? $"<color={DemoGui.Red}>ĐANG TẮT</color>" : $"<color={DemoGui.Green}>đang bật (mặc định)</color>");
-        DemoGui.Value("Lần vào Play gần nhất mất", $"{SessionState.GetFloat(PlayModeTimerKeys.LastEnterMs, 0f):F0} ms", DemoGui.Yellow);
-        GUILayout.BeginHorizontal();
-        if (DemoGui.Button("Tắt Domain Reload"))
+        if (DemoGui.Step(2, "Tắt Domain Reload, rồi Stop và Play lại 2–3 lần", "Thời gian vào Play giảm; “static KHÔNG reset” tăng 2, 3…; số handler Ping tăng dần."))
         {
             EditorSettings.enterPlayModeOptionsEnabled = true;
             EditorSettings.enterPlayModeOptions = EnterPlayModeOptions.DisableDomainReload;
-            DemoGui.Log("Đã tắt Domain Reload. Stop rồi Play lại để thấy khác biệt.", DemoGui.Yellow);
+            DemoGui.Log("Đã tắt Domain Reload. Stop rồi Play lại.", DemoGui.Yellow);
         }
-        if (DemoGui.Button("Bật lại (mặc định)"))
+#endif
+        if (DemoGui.Step(3, "Phát sự kiện Ping", "Handler từ các lần Play trước báo lỗi MissingReferenceException; Listener B vẫn đúng."))
+        {
+            DemoGui.ClearResults();
+            PlaySession.RaisePing();
+        }
+#if UNITY_EDITOR
+        if (DemoGui.Step(4, "Bật lại Domain Reload (bắt buộc sau khi demo)", "Lần Play sau mọi bộ đếm về 1."))
         {
             EditorSettings.enterPlayModeOptionsEnabled = false;
             DemoGui.Log("Đã bật lại Domain Reload", DemoGui.Green);
         }
-        GUILayout.EndHorizontal();
-        DemoGui.Label("<color=#9AA4B1>Cài đặt nằm ở Project Settings → Editor → Enter Play Mode Settings.</color>");
+        DemoGui.Hint("Cài đặt nằm ở Project Settings → Editor → Enter Play Mode Settings.");
 #endif
+        DemoGui.Takeaway("Tắt Domain Reload giúp vào Play nhanh, nhưng phải tự reset mọi <b>static</b> bằng <b>[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]</b>, và huỷ đăng ký event ở <b>OnDisable</b>.");
 
-        DemoGui.Section("B. Biến static qua nhiều lần Play");
-        DemoGui.Value("Lần Play thứ (static KHÔNG reset)", PlaySession.PlaysWithoutReset, PlaySession.PlaysWithoutReset > 1 ? DemoGui.Red : DemoGui.Green);
-        DemoGui.Value("Lần Play thứ (có [RuntimeInitializeOnLoadMethod])", PlaySession.PlaysWithReset, DemoGui.Green);
-
-        DemoGui.Section("C. Event static quên huỷ đăng ký");
-        DemoGui.Value("Số handler đang đăng ký Ping", PlaySession.PingHandlerCount, PlaySession.PingHandlerCount > 2 ? DemoGui.Red : DemoGui.Green);
-        DemoGui.Label("Scene có 1 listener Bad (đăng ký trong Start, không huỷ) và 1 listener Good (OnEnable/OnDisable).");
-        if (DemoGui.Button("Phát sự kiện Ping")) PlaySession.RaisePing();
-
-        DemoGui.Section("Cách thử");
-        DemoGui.Label("1. Bấm Play 2–3 lần với Domain Reload bật: mọi số đều về 1.");
-        DemoGui.Label("2. Tắt Domain Reload, Stop, Play lại 2–3 lần: số không reset tăng dần, handler cũ dồn lại.");
-        DemoGui.Label("3. So sánh thời gian vào Play ở mục A.");
-        DemoGui.Label("<color=#F2CC60>Xong demo nhớ bấm “Bật lại (mặc định)”.</color>");
+#if UNITY_EDITOR
+        DemoGui.Live("Domain Reload", reloadDisabled ? "ĐANG TẮT" : "đang bật (mặc định)", reloadDisabled ? V.Bad : V.Good);
+        DemoGui.Live("Lần vào Play gần nhất mất", $"{SessionState.GetFloat(PlayModeTimerKeys.LastEnterMs, 0f):F0} ms", V.Info, "Đo từ lúc bấm Play tới lúc vào Play mode.");
+#endif
+        DemoGui.Live("Lần Play thứ (static KHÔNG reset)", PlaySession.PlaysWithoutReset, PlaySession.PlaysWithoutReset > 1 ? V.Bad : V.Good, "Giá trị từ lần Play trước còn sót lại.");
+        DemoGui.Live("Lần Play thứ (có RuntimeInitializeOnLoadMethod)", PlaySession.PlaysWithReset, V.Good, "Luôn là 1: được reset đầu mỗi lần Play.");
+        DemoGui.Live("Số handler đang đăng ký Ping", PlaySession.PingHandlerCount, PlaySession.PingHandlerCount > 2 ? V.Bad : V.Good, "Listener A đăng ký trong Start, không huỷ → dồn lại. Listener B đăng ký OnEnable, huỷ OnDisable.");
         DemoGui.End();
     }
 

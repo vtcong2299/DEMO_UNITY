@@ -1,10 +1,11 @@
 {
-  "name": "doc",
+  "name": "talk-docs",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Sinh tài liệu Word và hình minh hoạ cho buổi chia sẻ",
+  "main": "build_doc.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "doc": "node build_doc.js",
+    "diagrams": "node diagrams.js"
   },
   "keywords": [],
   "author": "",

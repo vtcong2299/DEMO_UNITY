@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Threading;
 using UnityEngine;
+using V = DemoGui.Verdict;
 
 public class PlayerLoopDemo : MonoBehaviour
 {
@@ -64,7 +65,12 @@ public class PlayerLoopDemo : MonoBehaviour
         _updateCalls++;
 
         if (Time.frameCount == _reportSleepFrame)
-            DemoGui.Log($"Frame ngay sau khi ngủ {_reportSleepMs} ms: FixedUpdate chạy {_lastFrameFixed} lần", DemoGui.Yellow);
+        {
+            int capped = Mathf.RoundToInt(Time.maximumDeltaTime / Time.fixedDeltaTime);
+            int expected = Mathf.Min(Mathf.RoundToInt(_reportSleepMs / 1000f / Time.fixedDeltaTime), capped);
+            DemoGui.Result($"Frame ngay sau khi ngủ {_reportSleepMs} ms", $"{_lastFrameFixed} lần FixedUpdate", V.Info,
+                _reportSleepMs >= 1000 ? $"Không phải {_reportSleepMs / 20} lần: Maximum Allowed Timestep chặn ở khoảng {capped} lần." : $"Chạy bù khoảng {expected} lần để vật lý theo kịp thời gian.");
+        }
 
         if (KeyDownThisFrame) _jumpRequested = true;
 
@@ -131,14 +137,10 @@ public class PlayerLoopDemo : MonoBehaviour
 
     void OnGUI()
     {
-        DemoGui.Begin("03 · Player Loop: một frame chạy những gì", "FixedUpdate không gắn với frame. timeScale = 0 không dừng Update.");
+        DemoGui.Begin("03 · Một frame chạy những gì?", "FixedUpdate có chạy đúng 1 lần mỗi frame không? timeScale = 0 thì cái gì dừng?");
 
         DemoGui.Section("A. FixedUpdate mỗi frame");
-        DemoGui.Value("FPS", $"{1f / Mathf.Max(Time.unscaledDeltaTime, 0.0001f):F0}", DemoGui.Yellow);
-        DemoGui.Value("fixedDeltaTime", $"{Time.fixedDeltaTime:F3} s  (= {1f / Time.fixedDeltaTime:F0} lần/giây)");
-        DemoGui.Value("Frame trước có số lần FixedUpdate", _lastFrameFixed, DemoGui.Yellow);
-        DemoGui.Label($"Số frame có 0 lần: <b>{_fixedHistogram[0]}</b> · 1 lần: <b>{_fixedHistogram[1]}</b> · 2 lần: <b>{_fixedHistogram[2]}</b> · 3+ lần: <b>{_fixedHistogram[3]}</b>");
-        DemoGui.Label("Target FPS:");
+        DemoGui.Hint("1 · Chọn Target FPS. Kỳ vọng: FPS cao (Không giới hạn) → rất nhiều frame có 0 lần FixedUpdate; 30 FPS → hầu hết frame có 1–2 lần.");
         int rate = DemoGui.Choice(_frameRateIndex, new[] { "30", "60", "144", "Không giới hạn" });
         if (rate != _frameRateIndex)
         {
@@ -146,33 +148,33 @@ public class PlayerLoopDemo : MonoBehaviour
             Application.targetFrameRate = FrameRates[rate];
             ResetStats();
         }
-        GUILayout.BeginHorizontal();
-        if (DemoGui.Button("Frame chậm 100 ms")) _sleepNextFrameMs = 100;
-        if (DemoGui.Button("Frame chậm 1000 ms")) _sleepNextFrameMs = 1000;
-        GUILayout.EndHorizontal();
-        DemoGui.Label($"<color=#9AA4B1>Maximum Allowed Timestep = {Time.maximumDeltaTime:F3} s → tối đa khoảng {Time.maximumDeltaTime / Time.fixedDeltaTime:F0} lần FixedUpdate mỗi frame.</color>");
+        if (DemoGui.Step(2, "Làm 1 frame chậm 100 ms", "Frame sau chạy bù khoảng 5 lần FixedUpdate.")) _sleepNextFrameMs = 100;
+        if (DemoGui.Step(3, "Làm 1 frame chậm 1000 ms", "Chỉ khoảng 17 lần chứ không phải 50: Maximum Allowed Timestep chặn lại.")) _sleepNextFrameMs = 1000;
 
         DemoGui.Section("B. Đọc GetKeyDown trong FixedUpdate");
-        GUILayout.BeginHorizontal();
-        if (DemoGui.Button("Bấm Nhảy 1 lần")) Press();
-        if (DemoGui.Button("Tự bấm 50 lần")) _autoPressLeft = 50;
-        if (DemoGui.Button("Xoá số liệu")) ResetStats();
-        GUILayout.EndHorizontal();
-        DemoGui.Value("Đọc trong FixedUpdate (sai)", Percent(_hitsInFixed, _presses), DemoGui.Red);
-        DemoGui.Value("Đọc ở Update, xử lý ở FixedUpdate (đúng)", Percent(_hitsViaUpdate, _presses), DemoGui.Green);
+        if (DemoGui.Step(4, "Tự bấm nút Nhảy 50 lần", "FPS không giới hạn: đọc trong FixedUpdate mất nhiều lần bấm; đọc ở Update bắt đủ 100%.")) _autoPressLeft = 50;
+        if (DemoGui.Button("Xoá số liệu A và B")) ResetStats();
 
-        DemoGui.Section("C. Time.timeScale");
+        DemoGui.Section("C. Time.timeScale = 0");
         bool paused = Time.timeScale == 0f;
-        if (DemoGui.Toggle(paused, "Pause game (timeScale = 0)")) Time.timeScale = 0f;
-        else Time.timeScale = 1f;
-        DemoGui.Value("Update / giây", _updatePerSecond, DemoGui.Green);
-        DemoGui.Value("FixedUpdate / giây", _fixedPerSecond, paused ? DemoGui.Red : DemoGui.Green);
-        DemoGui.Value("Time.deltaTime", $"{Time.deltaTime:F4}", paused ? DemoGui.Red : null);
-        DemoGui.Value("Time.unscaledDeltaTime", $"{Time.unscaledDeltaTime:F4}", DemoGui.Green);
-        DemoGui.Value("Tick WaitForSeconds(1)", _scaledTicks, paused ? DemoGui.Red : null);
-        DemoGui.Value("Tick WaitForSecondsRealtime(1)", _realtimeTicks, DemoGui.Green);
-        DemoGui.Label("<color=#9AA4B1>Khối trái xoay theo deltaTime, khối phải theo unscaledDeltaTime.</color>");
+        bool pause = DemoGui.Toggle(paused, "5 · Pause game (timeScale = 0)");
+        if (pause != paused) Time.timeScale = pause ? 0f : 1f;
+        DemoGui.Hint("→ Kỳ vọng: Update vẫn chạy, FixedUpdate về 0; khối trái dừng, khối phải vẫn xoay.");
+
+        DemoGui.Takeaway("Đọc input ở <b>Update</b>, xử lý vật lý ở <b>FixedUpdate</b>. Menu pause: dùng <b>unscaledDeltaTime</b>, <b>WaitForSecondsRealtime</b>, Animator <b>Unscaled Time</b>.");
+
+        DemoGui.Live("FPS", $"{1f / Mathf.Max(Time.unscaledDeltaTime, 0.0001f):F0}", V.Info, $"fixedDeltaTime = {Time.fixedDeltaTime:F3} s → {1f / Time.fixedDeltaTime:F0} lần FixedUpdate mỗi giây.");
+        DemoGui.Live("Số frame có 0 / 1 / 2 / 3+ lần", $"{_fixedHistogram[0]} / {_fixedHistogram[1]} / {_fixedHistogram[2]} / {_fixedHistogram[3]}", V.Info, "Frame có 0 lần = frame mà code trong FixedUpdate không hề chạy.");
+        DemoGui.Live("Bắt nút: đọc trong FixedUpdate", Percent(_hitsInFixed, _presses), V.Bad, "Frame không có FixedUpdate thì lần bấm bị mất.");
+        DemoGui.Live("Bắt nút: đọc ở Update, xử lý ở FixedUpdate", Percent(_hitsViaUpdate, _presses), V.Good);
+        DemoGui.Live("Update / giây", _updatePerSecond, V.Good, "timeScale = 0 vẫn chạy, chỉ deltaTime = 0.");
+        DemoGui.Live("FixedUpdate / giây", _fixedPerSecond, paused ? V.Bad : V.Info, "timeScale = 0 thì dừng hẳn.");
+        DemoGui.Live("Tick WaitForSeconds(1)", _scaledTicks, paused ? V.Bad : V.Info, "Đứng yên khi pause.");
+        DemoGui.Live("Tick WaitForSecondsRealtime(1)", _realtimeTicks, V.Good, "Vẫn đếm khi pause.");
         DemoGui.End();
+
+        DemoGui.WorldLabel(scaledCube.position + Vector3.up * 0.9f, "xoay theo deltaTime");
+        DemoGui.WorldLabel(unscaledCube.position + Vector3.up * 0.9f, "xoay theo unscaledDeltaTime");
     }
 
     #endregion

@@ -1,5 +1,15 @@
 {
   "dependencies": {
+    "com.feeder.mcp": {
+      "version": "https://github.com/DigitalGhost2362/TheMatrix.git?path=/Packages/com.feeder.mcp",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {
+        "com.unity.modules.uielements": "1.0.0",
+        "com.unity.test-framework": "1.1.33"
+      },
+      "hash": "40524d5dab0504a456c1e1b12fa43e794403038c"
+    },
     "com.unity.burst": {
       "version": "1.8.28",
       "depth": 2,
@@ -24,7 +34,7 @@
     },
     "com.unity.ext.nunit": {
       "version": "2.0.5",
-      "depth": 4,
+      "depth": 2,
       "source": "builtin",
       "dependencies": {}
     },
@@ -99,7 +109,7 @@
     },
     "com.unity.test-framework": {
       "version": "1.6.0",
-      "depth": 3,
+      "depth": 1,
       "source": "builtin",
       "dependencies": {
         "com.unity.ext.nunit": "2.0.3",

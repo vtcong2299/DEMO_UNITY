@@ -1,11 +1,11 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Profiling;
 using UnityEngine.Scripting;
+using V = DemoGui.Verdict;
 
 public class GcDemo : MonoBehaviour
 {
@@ -30,39 +30,92 @@ public class GcDemo : MonoBehaviour
         true, false,
     };
 
-    [SerializeField] int iterations = 200;
+    const int SampleCount = 30;
+    const float ZeroThresholdBytes = 2f;
+    const float GcWindowSeconds = 10f;
+
+    [SerializeField] int iterations = 1000;
 
     readonly List<int> _numbers = Enumerable.Range(0, 32).ToList();
     readonly List<Transform> _transforms = new();
     readonly List<byte[]> _bigBlocks = new();
-    readonly float[] _history = new float[60];
+    readonly Queue<float> _onSamples = new();
+    readonly Queue<float> _offSamples = new();
+    readonly float[] _bytesPerCall = Enumerable.Repeat(-1f, Labels.Length).ToArray();
+    readonly List<float> _gcTimes = new();
 
     ProfilerRecorder _gcRecorder;
     Case _case;
-    int _historyIndex;
+    bool _ranThisFrame;
     int _counter;
     object _sink;
     long _sum;
-    float _baselineKb;
-    int _startCollections;
-    float _startTime;
+    int _lastCollectionCount;
+    float _lastGcFrameMs;
+    float _smoothedFrameMs;
 
     void OnEnable() => _gcRecorder = ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Allocated In Frame");
     void OnDisable() => _gcRecorder.Dispose();
 
-    void Start()
-    {
-        _startCollections = GC.CollectionCount(0);
-        _startTime = Time.realtimeSinceStartup;
-    }
+    void Start() => _lastCollectionCount = GC.CollectionCount(0);
 
     void Update()
     {
-        _history[_historyIndex] = _gcRecorder.LastValue / 1024f;
-        _historyIndex = (_historyIndex + 1) % _history.Length;
-        if (_case == Case.None) _baselineKb = AverageKb();
-        for (int i = 0; i < iterations; i++) Execute(_case);
+        TrackCollections();
+        RecordPreviousFrame();
+
+        _ranThisFrame = !_ranThisFrame;
+        if (_ranThisFrame)
+            for (int i = 0; i < iterations; i++) Execute(_case);
     }
+
+    #region Measure
+
+    // alternate run/skip frames so the demo UI's own per-frame garbage cancels out of the difference
+    void RecordPreviousFrame()
+    {
+        float bytes = _gcRecorder.LastValue;
+        var target = _ranThisFrame ? _onSamples : _offSamples;
+        target.Enqueue(bytes);
+        if (target.Count > SampleCount) target.Dequeue();
+
+        if (_onSamples.Count < SampleCount || _offSamples.Count < SampleCount) return;
+        float perCall = Mathf.Max(0f, (Median(_onSamples) - Median(_offSamples)) / iterations);
+        _bytesPerCall[(int)_case] = perCall;
+    }
+
+    // median ignores the occasional Editor spike that would skew an average
+    static float Median(IEnumerable<float> samples)
+    {
+        var sorted = samples.OrderBy(s => s).ToList();
+        return sorted[sorted.Count / 2];
+    }
+
+    void TrackCollections()
+    {
+        float frameMs = Time.unscaledDeltaTime * 1000f;
+        int count = GC.CollectionCount(0);
+        if (count != _lastCollectionCount)
+        {
+            _lastCollectionCount = count;
+            _lastGcFrameMs = frameMs;
+            _gcTimes.Add(Time.realtimeSinceStartup);
+            return;
+        }
+        _smoothedFrameMs = Mathf.Lerp(_smoothedFrameMs, frameMs, 0.05f);
+        _gcTimes.RemoveAll(time => Time.realtimeSinceStartup - time > GcWindowSeconds);
+    }
+
+    void SelectCase(Case c)
+    {
+        _case = c;
+        _onSamples.Clear();
+        _offSamples.Clear();
+    }
+
+    static string FormatBytes(float bytes) => bytes < 0f ? "đang đo…" : bytes < ZeroThresholdBytes ? "≈ 0 B/lần" : $"{bytes:F0} B/lần";
+
+    #endregion
 
     #region Cases
 
@@ -97,24 +150,17 @@ public class GcDemo : MonoBehaviour
         return total;
     }
 
-    float AverageKb()
-    {
-        float sum = 0f;
-        foreach (float v in _history) sum += v;
-        return sum / _history.Length;
-    }
-
     void AllocateBigBlocks()
     {
         for (int i = 0; i < 64; i++) _bigBlocks.Add(new byte[1024 * 1024]);
-        DemoGui.Log("Đã cấp phát 64 MB (giữ lại trong list)", DemoGui.Yellow);
+        DemoGui.Log("Đã cấp phát 64 MB (giữ lại trong list): Used và Heap size cùng tăng", DemoGui.Yellow);
     }
 
     void ReleaseBigBlocks()
     {
         _bigBlocks.Clear();
         GC.Collect();
-        DemoGui.Log("Bỏ 64 MB + GC.Collect(): Used giảm, nhưng Heap size thường KHÔNG co lại", DemoGui.Red);
+        DemoGui.Log("Bỏ 64 MB + GC.Collect(): Used giảm, Heap size thường giữ nguyên", DemoGui.Red);
     }
 
     #endregion
@@ -123,34 +169,31 @@ public class GcDemo : MonoBehaviour
 
     void OnGUI()
     {
-        DemoGui.Begin("06 · Garbage Collector: rác sinh ra từ đâu?", $"Mỗi frame chạy trường hợp đã chọn {iterations} lần rồi đo GC Alloc của cả frame.");
+        DemoGui.Begin("06 · Rác bộ nhớ sinh ra từ đâu?", $"Đoạn code nào tạo rác, mỗi lần gọi bao nhiêu byte? (chạy {iterations} lần, xen kẽ frame có/không)");
 
-        DemoGui.Section("Chọn trường hợp");
+        DemoGui.Section("Các bước");
+        DemoGui.Hint("1 · Chọn lần lượt từng ô, mỗi ô đợi khoảng 1 giây tới khi bảng bên phải hiện số. Kỳ vọng: ô đỏ ra vài chục byte/lần trở lên, ô xanh ra ≈ 0 B/lần.");
         int selected = DemoGui.Choice((int)_case, Labels, 2);
-        if (selected != (int)_case)
-        {
-            _case = (Case)selected;
-            DemoGui.Log($"Chuyển sang: {Labels[selected]}  (dự kiến tạo rác: {(Expected[selected] ? "CÓ" : "KHÔNG")})", Expected[selected] ? DemoGui.Red : DemoGui.Green);
-        }
-
-        float avg = AverageKb();
-        float delta = Mathf.Max(0f, avg - _baselineKb);
-        DemoGui.Section("Số đo");
-        DemoGui.Value("GC Alloc / frame (trung bình 60 frame)", $"{avg:F1} KB");
-        DemoGui.Value("Mốc khi \"Không làm gì\" (IMGUI cũng tạo rác)", $"{_baselineKb:F1} KB", DemoGui.Gray);
-        DemoGui.Value("Chênh lệch do trường hợp đang chọn", $"{delta:F1} KB/frame", delta > 0.5f ? DemoGui.Red : DemoGui.Green);
-        float minutes = Mathf.Max((Time.realtimeSinceStartup - _startTime) / 60f, 0.01f);
-        DemoGui.Value("Số lần GC đã chạy", $"{GC.CollectionCount(0) - _startCollections}  ({(GC.CollectionCount(0) - _startCollections) / minutes:F0} lần/phút)", DemoGui.Yellow);
-
-        DemoGui.Section("Heap của Mono (Boehm)");
-        DemoGui.Value("Đang dùng (Used)", $"{Profiler.GetMonoUsedSizeLong() / (1024f * 1024f):F1} MB");
-        DemoGui.Value("Kích thước heap (Reserved)", $"{Profiler.GetMonoHeapSizeLong() / (1024f * 1024f):F1} MB", DemoGui.Yellow);
-        DemoGui.Value("Incremental GC", DemoGui.YesNo(GarbageCollector.isIncremental));
+        if (selected != (int)_case) SelectCase((Case)selected);
         GUILayout.BeginHorizontal();
-        if (DemoGui.Button("Cấp phát 64 MB")) AllocateBigBlocks();
-        if (DemoGui.Button("Bỏ đi + GC.Collect()")) ReleaseBigBlocks();
+        bool allocate = DemoGui.Button("<b>2</b> · Cấp phát 64 MB");
+        bool release = DemoGui.Button("<b>3</b> · Bỏ đi + GC.Collect()");
         GUILayout.EndHorizontal();
-        DemoGui.Label("<color=#9AA4B1>Mở Profiler → CPU → cột GC Alloc để xem đúng hàm nào tạo rác.</color>");
+        if (allocate) AllocateBigBlocks();
+        if (release) ReleaseBigBlocks();
+        DemoGui.Hint("→ Kỳ vọng bước 2–3: Used tăng rồi giảm; Reserved tăng rồi GIỮ NGUYÊN (heap không co lại).");
+        DemoGui.Hint("4 · Chọn “LINQ Where().ToList()”, quan sát “Số lần GC” và “Frame có GC”. Kỳ vọng: GC chạy dày hơn; frame có GC chậm hơn frame thường.");
+
+        DemoGui.Takeaway("Code chạy mỗi frame: không ghép chuỗi, không LINQ, không lambda dùng biến ngoài, không foreach qua interface. Dùng bản <b>NonAlloc</b>/nhận <b>List</b>, <b>CompareTag</b>, cache <b>WaitForSeconds</b>.");
+
+        DemoGui.Live("Đang chạy", Labels[(int)_case], Expected[(int)_case] ? V.Bad : V.Good);
+        DemoGui.Live("Số lần GC đã chạy", GC.CollectionCount(0), V.Info, "GC chạy khi heap không còn đủ chỗ trống cho lần cấp phát mới. Tạo rác càng nhanh → GC chạy càng dày.");
+        DemoGui.Live($"Số lần GC trong {GcWindowSeconds:F0} giây gần nhất", _gcTimes.Count, _gcTimes.Count > 1 ? V.Bad : V.Info, "Đổi ô xong đợi 10 giây để con số phản ánh ô mới.");
+        DemoGui.Live("Frame có GC gần nhất / frame thường", $"{_lastGcFrameMs:F1} ms / {_smoothedFrameMs:F1} ms", _lastGcFrameMs > _smoothedFrameMs * 1.5f ? V.Bad : V.Info, "Frame có GC dài hơn: đó là cú khựng người chơi thấy.");
+        DemoGui.Live("Heap đang dùng (Used)", $"{Profiler.GetMonoUsedSizeLong() / (1024f * 1024f):F0} MB", V.Info, "Trong Editor heap chứa cả dữ liệu của Editor nên rất lớn; trên điện thoại nhỏ hơn nhiều.");
+        DemoGui.Live("Kích thước heap (Reserved)", $"{Profiler.GetMonoHeapSizeLong() / (1024f * 1024f):F0} MB", V.Info, $"Incremental GC: {DemoGui.YesNo(GarbageCollector.isIncremental)}");
+        for (int i = 1; i < Labels.Length; i++)
+            DemoGui.Live(Labels[i], FormatBytes(_bytesPerCall[i]), Expected[i] ? V.Bad : V.Good);
         DemoGui.End();
     }
 

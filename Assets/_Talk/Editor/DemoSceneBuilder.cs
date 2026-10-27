@@ -26,12 +26,16 @@ static class DemoSceneBuilder
 
     static DemoSceneBuilder() => EditorApplication.delayCall += AutoBuild;
 
+    // bump when the scene layout changes so every clone rebuilds once; a dot-file is invisible to the AssetDatabase
+    const string SceneVersion = "2";
+    const string VersionFile = ScenesFolder + "/.build_version";
+
     static string ScenePath(string sceneName) => $"{ScenesFolder}/{sceneName}.unity";
 
     static void AutoBuild()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode) return;
-        if (File.Exists(ScenePath(SceneNames[0]))) return;
+        if (File.Exists(VersionFile) && File.ReadAllText(VersionFile).Trim() == SceneVersion) return;
         if (EditorApplication.isCompiling || EditorApplication.isUpdating)
         {
             EditorApplication.delayCall += AutoBuild;
@@ -43,7 +47,8 @@ static class DemoSceneBuilder
     [MenuItem("Talk/Dựng lại toàn bộ scene demo")]
     public static void BuildAll()
     {
-        if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
+        bool onlyUntitled = string.IsNullOrEmpty(SceneManager.GetActiveScene().path) && SceneManager.sceneCount == 1;
+        if (!onlyUntitled && !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
         EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
         foreach (string folder in new[] { ScenesFolder, DataFolder, PrefabsFolder, RenderingFolder })
@@ -51,25 +56,27 @@ static class DemoSceneBuilder
         AssetDatabase.Refresh();
 
         bool urp = EnsureUrp();
-        var white = EnsureMaterial("Talk_White", new Color(0.9f, 0.9f, 0.92f), urp);
-        var red = EnsureMaterial("Talk_Red", new Color(0.9f, 0.3f, 0.3f), urp);
-        var green = EnsureMaterial("Talk_Green", new Color(0.3f, 0.8f, 0.45f), urp);
-        var blue = EnsureMaterial("Talk_Blue", new Color(0.3f, 0.55f, 0.95f), urp);
-        var yellow = EnsureMaterial("Talk_Yellow", new Color(0.95f, 0.8f, 0.3f), urp);
+        EnsureMaterial("Talk_White", new Color(0.9f, 0.9f, 0.92f), urp);
+        EnsureMaterial("Talk_Red", new Color(0.9f, 0.3f, 0.3f), urp);
+        EnsureMaterial("Talk_Green", new Color(0.3f, 0.8f, 0.45f), urp);
+        EnsureMaterial("Talk_Blue", new Color(0.3f, 0.55f, 0.95f), urp);
+        EnsureMaterial("Talk_Yellow", new Color(0.95f, 0.8f, 0.3f), urp);
+        AssetDatabase.SaveAssets();
         EnsureConfig();
-        var playerPrefab = EnsurePrefabs(blue, yellow);
+        EnsurePrefabs(Mat("Talk_Blue"), Mat("Talk_Yellow"));
 
-        BuildFakeNull(red, green);
-        BuildNativeCost(blue);
-        BuildPlayerLoop(red, green);
-        BuildLifetime(yellow);
-        BuildSerialization(playerPrefab);
+        BuildFakeNull();
+        BuildNativeCost();
+        BuildPlayerLoop();
+        BuildLifetime();
+        BuildSerialization();
         BuildGarbageCollector();
-        BuildRendering(white);
+        BuildRendering();
         BuildEnterPlayMode();
 
         EditorBuildSettings.scenes = SceneNames.Select(n => new EditorBuildSettingsScene(ScenePath(n), true)).ToArray();
         AssetDatabase.SaveAssets();
+        File.WriteAllText(VersionFile, SceneVersion);
         EditorSceneManager.OpenScene(ScenePath(SceneNames[0]));
         Debug.Log($"[Talk] Đã dựng {SceneNames.Length} scene demo trong {ScenesFolder}. Mở 01_FakeNull và bấm Play.");
     }
@@ -118,6 +125,17 @@ static class DemoSceneBuilder
     }
 
     const string ConfigPath = DataFolder + "/PlayerConfig.asset";
+    const string PlayerPrefabPath = PrefabsFolder + "/Player.prefab";
+
+    // load assets only after NewDemoScene: opening a scene in Single mode unloads unreferenced assets and leaves held references as fake nulls
+    static T LoadAsset<T>(string path) where T : Object
+    {
+        var asset = AssetDatabase.LoadAssetAtPath<T>(path);
+        if (asset == null) throw new FileNotFoundException($"[Talk] Không load được {typeof(T).Name} ở {path}");
+        return asset;
+    }
+
+    static Material Mat(string assetName) => LoadAsset<Material>($"{RenderingFolder}/{assetName}.mat");
 
     static void EnsureConfig()
     {
@@ -146,6 +164,7 @@ static class DemoSceneBuilder
         player.GetComponent<Renderer>().sharedMaterial = playerMaterial;
         var stats = player.AddComponent<PlayerStats>();
         stats.weapon = swordPrefab;
+        stats.speed = 7.5f;
         stats.hiddenButSaved = 42;
         var playerPrefab = PrefabUtility.SaveAsPrefabAsset(player, $"{PrefabsFolder}/Player.prefab");
         Object.DestroyImmediate(player);
@@ -193,9 +212,10 @@ static class DemoSceneBuilder
 
     static void Save(Scene scene, int index) => EditorSceneManager.SaveScene(scene, ScenePath(SceneNames[index]));
 
-    static void BuildFakeNull(Material red, Material green)
+    static void BuildFakeNull()
     {
         var scene = NewDemoScene();
+        Material red = Mat("Talk_Red"), green = Mat("Talk_Green");
         var demo = AddDemo<FakeNullDemo>("FakeNullDemo");
         var parent = new GameObject("Enemies").transform;
         parent.position = new Vector3(0f, 1.5f, 0f);
@@ -205,46 +225,50 @@ static class DemoSceneBuilder
         Save(scene, 0);
     }
 
-    static void BuildNativeCost(Material blue)
+    static void BuildNativeCost()
     {
         var scene = NewDemoScene();
+        var blue = Mat("Talk_Blue");
         var demo = AddDemo<NativeCostDemo>("NativeCostDemo");
         demo.gameObject.tag = "Player";
         var body = demo.gameObject.AddComponent<Rigidbody>();
         body.isKinematic = true;
         body.useGravity = false;
-        var mover = Primitive(PrimitiveType.Sphere, "Mover", new Vector3(3f, 2f, 0f), blue);
+        var mover = Primitive(PrimitiveType.Sphere, "Mover", new Vector3(0f, 2.5f, 0f), blue);
         new GameObject("Target");
         Set(demo, "mover", mover.transform);
         Save(scene, 1);
     }
 
-    static void BuildPlayerLoop(Material red, Material green)
+    static void BuildPlayerLoop()
     {
         var scene = NewDemoScene();
+        Material red = Mat("Talk_Red"), green = Mat("Talk_Green");
         var demo = AddDemo<PlayerLoopDemo>("PlayerLoopDemo");
-        var scaled = Primitive(PrimitiveType.Cube, "Xoay theo deltaTime", new Vector3(1.5f, 2.5f, 0f), red);
-        var unscaled = Primitive(PrimitiveType.Cube, "Xoay theo unscaledDeltaTime", new Vector3(4.5f, 2.5f, 0f), green);
+        var scaled = Primitive(PrimitiveType.Cube, "Xoay theo deltaTime", new Vector3(-1.1f, 2.5f, 0f), red);
+        var unscaled = Primitive(PrimitiveType.Cube, "Xoay theo unscaledDeltaTime", new Vector3(1.1f, 2.5f, 0f), green);
         Set(demo, "scaledCube", scaled.transform);
         Set(demo, "unscaledCube", unscaled.transform);
         Save(scene, 2);
     }
 
-    static void BuildLifetime(Material yellow)
+    static void BuildLifetime()
     {
         var scene = NewDemoScene();
+        var yellow = Mat("Talk_Yellow");
         var demo = AddDemo<LifetimeDemo>("LifetimeDemo");
         Set(demo, "workerMaterial", yellow);
         Save(scene, 3);
     }
 
-    static void BuildSerialization(GameObject playerPrefab)
+    static void BuildSerialization()
     {
-        var config = AssetDatabase.LoadAssetAtPath<PlayerConfig>(ConfigPath);
         var scene = NewDemoScene();
+        var config = LoadAsset<PlayerConfig>(ConfigPath);
+        var playerPrefab = LoadAsset<GameObject>(PlayerPrefabPath);
         var demo = AddDemo<SerializationDemo>("SerializationDemo");
         var player = (GameObject)PrefabUtility.InstantiatePrefab(playerPrefab);
-        player.transform.position = new Vector3(3f, 2f, 0f);
+        player.transform.position = new Vector3(0f, 1.5f, 0f);
         var stats = player.GetComponent<PlayerStats>();
         stats.notSaved = 42;
 
@@ -270,12 +294,13 @@ static class DemoSceneBuilder
         Save(scene, 5);
     }
 
-    static void BuildRendering(Material white)
+    static void BuildRendering()
     {
         var scene = NewDemoScene();
+        var white = Mat("Talk_White");
         var demo = AddDemo<RenderingDemo>("RenderingDemo");
         var grid = new GameObject("Grid").transform;
-        grid.position = new Vector3(0.3f, -1.2f, 0f);
+        grid.position = new Vector3(-1.7f, -0.5f, 0f);
         Set(demo, "baseMaterial", white);
         Set(demo, "gridRoot", grid);
         Save(scene, 6);
